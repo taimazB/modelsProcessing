@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "layers": {
+    "chlorophyll_nesdis_2020-08-17": {
+      "source": "mapbox://tileset-source/taimaz/chlorophyll_nesdis_2020-08-17",
+      "minzoom": 0,
+      "maxzoom": 10
+    }
+  }
+}

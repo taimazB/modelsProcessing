@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "layers": {
+    "iceberg_m1": {
+      "source": "mapbox://tileset-source/taimaz/iceberg_m1",
+      "minzoom": 0,
+      "maxzoom": 10
+    }
+  }
+}

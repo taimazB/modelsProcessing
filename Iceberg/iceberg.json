@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "layers": {
+      "iceberg_m01": {"source": "mapbox://tileset-source/oceangns/iceberg_m01", "minzoom": 0, "maxzoom": 5},
+      "iceberg_m02": {"source": "mapbox://tileset-source/oceangns/iceberg_m02", "minzoom": 0, "maxzoom": 5},
+      "iceberg_m03": {"source": "mapbox://tileset-source/oceangns/iceberg_m03", "minzoom": 0, "maxzoom": 5},
+      "iceberg_m04": {"source": "mapbox://tileset-source/oceangns/iceberg_m04", "minzoom": 0, "maxzoom": 5},
+      "iceberg_m05": {"source": "mapbox://tileset-source/oceangns/iceberg_m05", "minzoom": 0, "maxzoom": 5},
+      "iceberg_m06": {"source": "mapbox://tileset-source/oceangns/iceberg_m06", "minzoom": 0, "maxzoom": 5},
+      "iceberg_m07": {"source": "mapbox://tileset-source/oceangns/iceberg_m07", "minzoom": 0, "maxzoom": 5},
+      "iceberg_m08": {"source": "mapbox://tileset-source/oceangns/iceberg_m08", "minzoom": 0, "maxzoom": 5},
+      "iceberg_m09": {"source": "mapbox://tileset-source/oceangns/iceberg_m09", "minzoom": 0, "maxzoom": 5},
+      "iceberg_m10": {"source": "mapbox://tileset-source/oceangns/iceberg_m10", "minzoom": 0, "maxzoom": 5},
+      "iceberg_m11": {"source": "mapbox://tileset-source/oceangns/iceberg_m11", "minzoom": 0, "maxzoom": 5},
+      "iceberg_m12": {"source": "mapbox://tileset-source/oceangns/iceberg_m12", "minzoom": 0, "maxzoom": 5}
+  }
+}

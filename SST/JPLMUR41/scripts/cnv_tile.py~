@@ -1,0 +1,137 @@
+import numpy as np
+from netCDF4 import Dataset
+import os
+import sys
+import png
+import matplotlib.pyplot as plt
+from scipy import interpolate
+from colour import Color
+import gc
+
+
+date = sys.argv[1]
+
+ncFile = Dataset("JPLMUR41_SST_%s_09.nc" % date, 'r')
+sst = ncFile.variables['analysed_sst'][0].data
+sstMin = -2
+sstMax = 35
+sst -= 273.15
+sst[sst<sstMin] = -1000  ##  For interpolation, NaN is not accepted
+sst = sst[499:-499,:]  ##  lat: 85S - 85N
+print("##  File load done.")
+
+# lat = ncFile.variables['lat'][:].data
+lat = np.arange(-85,85.01,0.01)  ##  85.0511287798066 is the max lat in tiling system
+lon = ncFile.variables['lon'][:].data
+maxTileLat = 85.0511287798066
+tileSize = 512 ## px
+maxZoom = 6
+
+
+##  Mercator
+R = 6378137
+x = R * lon * np.pi/180.
+y = R * np.log( np.tan(np.pi/4 + lat*np.pi/180/2) )
+
+
+##  For interpolation
+interp = interpolate.interp2d(x, y, sst, kind='linear')
+# interp = interpolate.RectBivariateSpline(y, x, sst)
+print("##  Interpolation function done.")
+
+
+
+def colorRange(color1, color2, n):
+    colors = []
+    for r,g,b in zip(np.linspace(color1[0],color2[0],n) ,np.linspace(color1[1],color2[1],n) ,np.linspace(color1[2],color2[2], n)):
+        colors.append((r,g,b))
+    return colors
+
+
+##  Continents = black
+color0  = [(0,0,0)]
+
+##  Purple range
+colors1 = colorRange([204,0,204],[255,153,255],20)
+
+##  Blue range
+colors2 = colorRange([0,102,204],[102,255,204],100)
+
+##  Green range
+colors3 = colorRange([0,153,51],[204,255,102],100)
+
+##  Yellow range
+colors4 = colorRange([255,255,0],[255,153,51],100)
+
+##  Red range
+colors5 = colorRange([255,0,0],[255,204,204],50)
+
+##  All ranges
+colors = np.array(color0+colors1+colors2+colors3+colors4+colors5)
+
+
+
+def yMercator(lat):
+    return R * np.log( np.tan(np.pi/4 + lat*np.pi/180/2) )
+
+
+for zoom in np.arange(2,8):
+    print("--  Start zoom %d" % zoom)
+    noOfPoints = 2**zoom*tileSize
+    #
+    xx = np.linspace(yMercator(-maxTileLat), yMercator(maxTileLat), noOfPoints)
+    yy = np.linspace(yMercator(-maxTileLat), yMercator(maxTileLat), noOfPoints)
+    #
+    if zoom<=5:
+        sstNew = interp(xx, yy)
+        print("##  Interpolating done.")
+        #
+        sstNewRounded = np.round(sstNew, 1)
+        sstNewInt = (10*(sstNewRounded-sstMin)).astype(np.int)
+        sstNewInt[sstNewInt<0] = 0
+        sstNewInt[sstNewInt>10*(sstMax-sstMin)] = 10*(sstMax-sstMin)
+        sstColored = colors[sstNewInt]
+        print("##  Coloring done.")
+        #
+        #
+        ##  Save multiple resolutions
+        for i in np.arange(2**zoom):
+            for j in np.arange(2**zoom):
+                devNull = os.system('mkdir -p ../tiles/JPLMUR41_SST_%s_09/%d/%d' % (date,zoom,i))
+                subSST = sstColored[j*tileSize:(j+1)*tileSize,i*tileSize:(i+1)*tileSize,:]
+                img2list = np.flipud(subSST).reshape(-1, 3*subSST.shape[1]).astype(np.uint8)
+                with open('../tiles/JPLMUR41_SST_%s_09/%d/%d/%d.png' % (date,zoom,i,2**zoom-j-1), 'wb') as f:
+                    writer = png.Writer(width=subSST.shape[1], height=subSST.shape[0], bitdepth=8, greyscale=False)
+                    writer.write(f, img2list)
+        #
+        #
+    else: ##  For memory issues, need to break into chunks for zooms>=6
+        xLength = 8*tileSize  ##  Due to memory issue
+        xChunks = int(xx.size / xLength)
+        for iSub in np.arange(xChunks):
+            xxSub = xx[int(iSub*noOfPoints/xChunks):int((iSub+1)*noOfPoints/xChunks)]
+            sstNew = interp(xxSub, yy)
+            print("##  Interpolating %d of %d done." % (iSub,xChunks))
+            #
+            sstNewRounded = np.round(sstNew, 1)
+            sstNewInt = (10*(sstNewRounded-sstMin)).astype(np.int)
+            sstNewInt[sstNewInt<0] = 0
+            sstNewInt[sstNewInt>10*(sstMax-sstMin)] = 10*(sstMax-sstMin)
+            sstColored = colors[sstNewInt]
+            print("##  Coloring done.")
+            #
+            #
+            ##  Save multiple resolutions
+            for i in np.arange(8):
+                for j in np.arange(2**zoom):
+                    devNull = os.system('mkdir -p ../tiles/JPLMUR41_SST_%s_09/%d/%d' % (date,zoom,i+8*iSub))
+                    subSST = sstColored[j*tileSize:(j+1)*tileSize,i*tileSize:(i+1)*tileSize,:]
+                    img2list = np.flipud(subSST).reshape(-1, 3*subSST.shape[1]).astype(np.uint8)
+                    with open('../tiles/JPLMUR41_SST_%s_09/%d/%d/%d.png' % (date,zoom,i+8*iSub,2**zoom-j-1), 'wb') as f:
+                        writer = png.Writer(width=subSST.shape[1], height=subSST.shape[0], bitdepth=8, greyscale=False)
+                        writer.write(f, img2list)
+
+exit()
+
+plt.imshow(sstNew)
+plt.show()

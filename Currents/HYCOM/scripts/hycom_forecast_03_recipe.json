@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "layers": {
+    "hycom_forecast_03": {
+      "source": "mapbox://tileset-source/taimaz/hycom_forecast_03",
+      "minzoom": 0,
+      "maxzoom": 10
+    }
+  }
+}

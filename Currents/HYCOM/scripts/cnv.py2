@@ -1,0 +1,67 @@
+import numpy as np
+from netCDF4 import Dataset
+import numpy as np
+import math
+import sys
+
+
+fileName = sys.argv[1]
+ncin = Dataset(fileName,'r')
+longitude = ncin.variables['lon']
+latitude = ncin.variables['lat']
+depth = ncin.variables['depth'][:].data
+u = ncin.variables['water_u'][0].data
+v = ncin.variables['water_v'][0].data
+
+missingValue = -30000
+u[u==missingValue] = np.nan
+v[v==missingValue] = np.nan
+
+
+##  Average from 100 to 1000 m depth, ignore nan's
+uZavg = np.nanmean(u[(depth>=100) & (depth<=1000),:,:], axis=0)
+vZavg = np.nanmean(v[(depth>=100) & (depth<=1000),:,:], axis=0)
+
+
+
+##  Write netCDF
+# open a netCDF file to write
+fileName = fileName.replace('allDepth', 'avgDepth')
+ncout = Dataset(fileName, 'w', format='NETCDF4')
+
+# define axis size
+ncout.createDimension('x', longitude.size)
+ncout.createDimension('y', latitude.size)
+
+# create longitude axis
+lon = ncout.createVariable('longitude', 'double', ('x'))
+lon.standard_name = 'longitude'
+lon.long_name = 'longitude'
+lon.units = 'degrees_east'
+lon.axis = 'X'
+
+# create latitude axis
+lat = ncout.createVariable('latitude', 'double', ('y',))
+lat.standard_name = 'latitude'
+lat.long_name = 'latitude'
+lat.units = 'degrees_north'
+lat.axis = 'Y'
+
+# create variable array
+uout = ncout.createVariable('u', 'double', ('y', 'x'))
+uout.long_name = 'zonal velocity'
+uout.units = 'm/s'
+
+vout = ncout.createVariable('v', 'double', ('y', 'x'))
+vout.long_name = 'meridional velocity'
+vout.units = 'm/s'
+
+# copy axis from original dataset
+lon[:] = longitude[:]
+lat[:] = latitude[:]
+uout[:,:] = uZavg[:,:]
+vout[:,:] = vZavg[:,:]
+
+# close files
+ncin.close()
+ncout.close()
