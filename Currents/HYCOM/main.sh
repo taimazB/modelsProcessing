@@ -5,6 +5,8 @@ ftpLink='https://ncss.hycom.org/thredds/ncss/GLBy0.08/expt_93.0/FMRC/runs/'
 
 export HERE=${HOME}/Projects/OceanGNS/data/Currents/HYCOM
 export archive=/media/taimaz/14TB/Currents/HYCOM
+export pathPlanning=/home/taimaz/Projects/OceanGNS/pathPlanning/gnt/Datasets/HYCOM/
+
 
 lastAvailDate=`curl https://tds.hycom.org/thredds/catalog/GLBy0.08/expt_93.0/FMRC/runs/catalog.html | grep GLBy | grep '^<a' | head -1 | sed 's/.*GLBy0\.08_930_FMRC_RUN_\(.*\)T12.*/\1/' | sed 's/-//g'`
 lastDlDate=`cat ${HERE}/.lastAvailDate`
@@ -21,16 +23,16 @@ if [[ ! -z ${lastAvailDate} ]] && [[ ${lastAvailDate} != ${lastDlDate} ]]; then
     while [[ redo -eq 1 ]]; do
     	cd ${HERE}/nc
     	date=${lastAvailDate}
-    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_west.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=-180&east=0&south=-85&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {12..21..3}
-    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_east.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=0&east=180&south=-85&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {12..21..3}
+    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_west.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=-180&east=0&south=-80&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {12..21..3}
+    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_east.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=0&east=180&south=-80&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {12..21..3}
 
     	date=`date -d "${date} +1 day" +%Y%m%d`
-    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_west.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=-180&east=0&south=-85&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {00..21..3}
-    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_east.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=0&east=180&south=-85&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {00..21..3}
+    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_west.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=-180&east=0&south=-80&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {00..21..3}
+    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_east.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=0&east=180&south=-80&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {00..21..3}
     
     	date=`date -d "${date} +1 day" +%Y%m%d`
-    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_west.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=-180&east=0&south=-85&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {00..21..3}
-    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_east.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=0&east=180&south=-85&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {00..21..3}
+    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_west.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=-180&east=0&south=-80&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {00..21..3}
+    	parallel -j 4 "wget -nc -O HYCOM_Currents_${date}_{}_east.nc '${ftpLink}GLBy0.08_930_FMRC_RUN_${lastAvailDate}T12:00:00Z?var=water_u&var=water_v&north=85.0000&west=0&east=180&south=-80&horizStride=1&time=${date}T{}%3A00%3A00Z&vertCoord=&addLatLon=true&accept=netcdf4'" ::: {00..21..3}
 
 
     	##  Check for bad downloads
@@ -43,7 +45,7 @@ if [[ ! -z ${lastAvailDate} ]] && [[ ${lastAvailDate} != ${lastDlDate} ]]; then
     	    fi
     	done
     done
-exit
+
     
     #########################
     ##  Average depth
@@ -88,41 +90,33 @@ exit
     
     ##################################################
     ##  Path Planning time averaged & 8 time steps forecast files
-    rm ${archive}/gntForecast/*
     date=`date -d "${lastAvailDate} +1 day" +%Y%m%d`
     cd ${HERE}/nc/
-    cdo -O ensmean ${HERE}/nc/HYCOM_Currents_avgDepth_${date}*.nc ${archive}/gntForecast/HYCOM_Currents_avgDepth_avgTime_forecast.nc
+    cdo -O ensmean ${HERE}/nc/HYCOM_Currents_avgDepth_${date}*.nc ${HERE}/nc/HYCOM_Currents_avgDepth_avgTime_forecast.nc
 
 
     #####################################################
     ##  Copy to server
-    ssh 192.168.2.11 <<EOF
-rm /home/taimaz/Projects/oceanGNS/web/api/public/gnt/Datasets/HYCOM/forecast/*
-EOF
-    mv ${HERE}/nc/HYCOM_Currents_avgDepth_${date}*.nc ${archive}/gntForecast/
-    rsync -auz ${archive}/gntForecast/* 192.168.2.11:/home/taimaz/Projects/oceanGNS/web/api/public/gnt/Datasets/HYCOM/forecast/ &
+    rm ${pathPlanning}/forecast/*
+    mv ${HERE}/nc/HYCOM_Currents_avgDepth_${date}*.nc ${HERE}/nc/HYCOM_Currents_avgDepth_avgTime_forecast.nc ${pathPlanning}/forecast/
     
 
     #####################################################
     ##  Path Planning hindcast file:  7 days before today
-    rm ${archive}/gntHindcast/*
     cd ${archive}/hindcast/
-    cdo -O ensmean `ls HYCOM_Currents_avgDepth_*.nc | tail -56` ${archive}/gntHindcast/HYCOM_Currents_avgDepth_avgTime_7d.nc
-    cdo -O ensstd `ls HYCOM_Currents_avgDepth_*.nc | tail -56` ${archive}/gntHindcast/HYCOM_Currents_avgDepth_stdTime_7d.nc
-    ncrename -O -v u,u_mean -v v,v_mean ${archive}/gntHindcast/HYCOM_Currents_avgDepth_avgTime_7d.nc
-    ncrename -O -v u,u_std -v v,v_std ${archive}/gntHindcast/HYCOM_Currents_avgDepth_stdTime_7d.nc
+    cdo -O ensmean `ls HYCOM_Currents_avgDepth_*.nc | tail -56` ${HERE}/nc/gntHindcast/HYCOM_Currents_avgDepth_avgTime_7d.nc
+    cdo -O ensstd `ls HYCOM_Currents_avgDepth_*.nc | tail -56` ${HERE}/nc/gntHindcast/HYCOM_Currents_avgDepth_stdTime_7d.nc
+    ncrename -O -v u,u_mean -v v,v_mean ${HERE}/nc/HYCOM_Currents_avgDepth_avgTime_7d.nc
+    ncrename -O -v u,u_std -v v,v_std ${HERE}/nc/HYCOM_Currents_avgDepth_stdTime_7d.nc
 
-    cdo -O merge ${archive}/gntHindcast/HYCOM_Currents_avgDepth_avgTime_7d.nc ${archive}/gntHindcast/HYCOM_Currents_avgDepth_stdTime_7d.nc ${archive}/gntHindcast/HYCOM_Currents_avgDepth_avgstdTime_7d.nc
-    rm ${archive}/gntHindcast/HYCOM_Currents_avgDepth_avgTime_7d.nc ${archive}/gntHindcast/HYCOM_Currents_avgDepth_stdTime_7d.nc
-    cp ${archive}/gntForecast/HYCOM_Currents_avgDepth_2*.nc ${archive}/hindcast/
+    cdo -O merge ${HERE}/nc/HYCOM_Currents_avgDepth_avgTime_7d.nc ${HERE}/nc/HYCOM_Currents_avgDepth_stdTime_7d.nc ${HERE}/nc/HYCOM_Currents_avgDepth_avgstdTime_7d.nc
+    rm ${HERE}/nc/HYCOM_Currents_avgDepth_avgTime_7d.nc ${HERE}/nc/HYCOM_Currents_avgDepth_stdTime_7d.nc
+    cp ${pathPlanning}/forecast/HYCOM_Currents_avgDepth_2*.nc ${archive}/hindcast/ &
 
 
     #####################################################
     ##  Copy to server
-    ssh 192.168.2.11 <<EOF
-rm /home/taimaz/Projects/oceanGNS/web/api/public/gnt/Datasets/HYCOM/hindcast/*
-EOF
-    rsync -au ${archive}/gntHindcast/HYCOM_Currents_avgDepth_avgstdTime_7d.nc 192.168.2.11:/home/taimaz/Projects/oceanGNS/web/api/public/gnt/Datasets/HYCOM/hindcast/
+    mv ${HERE}/nc/HYCOM_Currents_avgDepth_avgstdTime_7d.nc ${pathPlanning}/hindcast/
 
 
     #####################################################

@@ -5,6 +5,7 @@ export ftpLink="https://dd.meteo.gc.ca/model_riops/netcdf/forecast/polar_stereog
 
 export HERE=${HOME}/Projects/OceanGNS/data/Currents/RIOPS
 export archive=/media/taimaz/14TB/Currents/RIOPS
+export pathPlanning=/home/taimaz/Projects/OceanGNS/pathPlanning/gnt/Datasets/RIOPS/
 
 
 curl ${ftpLink}048/ > ${HERE}/files
@@ -94,37 +95,31 @@ if [[ ! -z ${lastAvailDate} ]] && [[ ${lastAvailDate} != ${lastDlDate} ]]; then
 
     ##################################################
     ##  Path Planning time averaged & 8 time steps forecast files
-    rm ${archive}/gntForecast/*
     cd ${HERE}/nc/
-    cdo -O ensmean ${HERE}/nc/RIOPS_Currents_avgDepth_${lastAvailDate}_*.nc ${archive}/gntForecast/RIOPS_Currents_avgDepth_avgTime_forecast.nc
+    cdo -O ensmean ${HERE}/nc/RIOPS_Currents_avgDepth_${lastAvailDate}_*.nc ${HERE}/nc/RIOPS_Currents_avgDepth_avgTime_forecast.nc
 
-    ##  Copy to data-process
-    ssh 192.168.2.11 << EOF
-rm /home/taimaz/Projects/oceanGNS/web/api/public/gnt/Datasets/RIOPS/forecast/*
-EOF
-    mv ${HERE}/nc/RIOPS_Currents_avgDepth_${lastAvailDate}_*.nc ${archive}/gntForecast/
-    rsync -au ${archive}/gntForecast/* 192.168.2.11:/home/taimaz/Projects/oceanGNS/web/api/public/gnt/Datasets/RIOPS/forecast/ &
+    
+    #####################################################
+    ##  Copy to path planning
+    rm ${pathPlanning}/forecast/*
+    mv ${HERE}/nc/RIOPS_Currents_avgDepth_${lastAvailDate}_*.nc ${HERE}/nc/RIOPS_Currents_avgDepth_avgTime_forecast.nc ${pathPlanning}/forecast/
 
 
     #####################################################
     ##  Path Planning hindcast file:  7 days before today (7*24 files)
-    rm ${archive}/gntHindcast/*
     cd ${archive}/hindcast/
-    cdo -O ensmean `ls RIOPS_Currents_avgDepth_2*.nc | tail -168` ${archive}/gntHindcast/RIOPS_Currents_avgDepth_avgTime_7d.nc
-    cdo -O ensstd `ls RIOPS_Currents_avgDepth_2*.nc | tail -168` ${archive}/gntHindcast//RIOPS_Currents_avgDepth_stdTime_7d.nc
-    ncrename -O -v u,u_mean -v v,v_mean ${archive}/gntHindcast/RIOPS_Currents_avgDepth_avgTime_7d.nc
-    ncrename -O -v u,u_std -v v,v_std ${archive}/gntHindcast/RIOPS_Currents_avgDepth_stdTime_7d.nc
-    cdo -O merge ${archive}/gntHindcast/RIOPS_Currents_avgDepth_avgTime_7d.nc ${archive}/gntHindcast/RIOPS_Currents_avgDepth_stdTime_7d.nc ${archive}/gntHindcast/RIOPS_Currents_avgDepth_avgstdTime_7d.nc
-    rm ${archive}/gntHindcast/RIOPS_Currents_avgDepth_stdTime_7d.nc ${archive}/gntHindcast/RIOPS_Currents_avgDepth_avgTime_7d.nc
-    cp ${archive}/gntForecast/RIOPS_Currents_avgDepth_2*.nc ${archive}/hindcast/
+    cdo -O ensmean `ls RIOPS_Currents_avgDepth_2*.nc | tail -168` ${HERE}/nc/RIOPS_Currents_avgDepth_avgTime_7d.nc
+    cdo -O ensstd `ls RIOPS_Currents_avgDepth_2*.nc | tail -168` ${HERE}/nc/RIOPS_Currents_avgDepth_stdTime_7d.nc
+    ncrename -O -v u,u_mean -v v,v_mean ${HERE}/nc/RIOPS_Currents_avgDepth_avgTime_7d.nc
+    ncrename -O -v u,u_std -v v,v_std ${HERE}/nc/RIOPS_Currents_avgDepth_stdTime_7d.nc
+    cdo -O merge ${HERE}/nc/RIOPS_Currents_avgDepth_avgTime_7d.nc ${HERE}/nc/RIOPS_Currents_avgDepth_stdTime_7d.nc ${HERE}/nc/RIOPS_Currents_avgDepth_avgstdTime_7d.nc
+    rm ${HERE}/nc/RIOPS_Currents_avgDepth_stdTime_7d.nc ${HERE}/nc/RIOPS_Currents_avgDepth_avgTime_7d.nc
+    cp ${pathPlanning}/forecast/RIOPS_Currents_avgDepth_2*.nc ${archive}/hindcast/ &
 
 
     #####################################################
-    ##  Copy to server
-    ssh 192.168.2.11 <<EOF
-rm /home/taimaz/Projects/oceanGNS/web/api/public/gnt/Datasets/RIOPS/hindcast/*
-EOF
-    rsync -au ${archive}/gntHindcast/* 192.168.2.11:/home/taimaz/Projects/oceanGNS/web/api/public/gnt/Datasets/RIOPS/hindcast/
+    ##  Copy to path planning
+    mv ${HERE}/nc/RIOPS_Currents_avgDepth_avgstdTime_7d.nc ${pathPlanning}/hindcast/
 
     
     #####################################################
