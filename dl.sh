@@ -1,51 +1,32 @@
-HERE=/home/taimaz/Projects/OceanGNS/data
-
+export HERE=/home/taimaz/Projects/data
 cd ${HERE}
 
-if [[ ! -e ${HERE}/.inProgress ]]; then
-    > ${HERE}/.inProgress
-    > ${HERE}/log
 
-    # cd ${HERE}/Chlorophyll/NESDIS/
+function dl(){
+    dir=$1
+    cd ${HERE}/${dir}
     # echo -e "`date +%x-%X` \t `pwd`" >> ${HERE}/log
-    # ./main.sh
+    bash `ls dl*.sh`
     # echo -e "`date +%x-%X` \t `pwd` \t DONE" >> ${HERE}/log
+}
 
-    cd ${HERE}/SST/JPLMUR41/
-    echo -e "`date +%x-%X` \t `pwd`" >> ${HERE}/log
-    ./main.sh
-    echo -e "`date +%x-%X` \t `pwd` \t DONE" >> ${HERE}/log
+if [[ ! -e ${HERE}/.dlInProgress ]]; then
+    > ${HERE}/.dlInProgress
+    # > ${HERE}/log
 
-    cd ${HERE}/SWH/CMC/
-    echo -e "`date +%x-%X` \t `pwd`" >> ${HERE}/log
-    ./main.sh
-    echo -e "`date +%x-%X` \t `pwd` \t DONE" >> ${HERE}/log
-    
-    cd ${HERE}/Seaice/CMC/
-    echo -e "`date +%x-%X` \t `pwd`" >> ${HERE}/log
-    ./main.sh
-    echo -e "`date +%x-%X` \t `pwd` \t DONE" >> ${HERE}/log
+    dl Seaice/RIOPS/
+    dl MLD/RIOPS/
+    dl Chlorophyll/MODIS/
+    dl SST/JPLMUR41/
+    dl Currents/RIOPS/
+    dl Currents/CMC/
+    dl Currents/Doppio
+    dl Seaice/RTOFS/
+    dl SS/RESPS/
+    dl Seaice/Barents
+    dl SST/Coraltemp  ##  also Seaice/Coraltemp
+    dl Currents/Norkyst800m
 
-    cd ${HERE}/Currents/WMOP-surface/
-    echo -e "`date +%x-%X` \t `pwd`" >> ${HERE}/log
-    ./main.sh
-    echo -e "`date +%x-%X` \t `pwd` \t DONE" >> ${HERE}/log
-    
-    cd ${HERE}/Currents/CMC/
-    echo -e "`date +%x-%X` \t `pwd`" >> ${HERE}/log
-    ./main.sh
-    echo -e "`date +%x-%X` \t `pwd` \t DONE" >> ${HERE}/log
-
-    cd ${HERE}/Currents/HYCOM/
-    echo -e "`date +%x-%X` \t `pwd`" >> ${HERE}/log
-    ./main.sh
-    echo -e "`date +%x-%X` \t `pwd` \t DONE" >> ${HERE}/log
-    
-    cd ${HERE}/Currents/RIOPS/
-    echo -e "`date +%x-%X` \t `pwd`" >> ${HERE}/log
-    ./main.sh
-    echo -e "`date +%x-%X` \t `pwd` \t DONE" >> ${HERE}/log
-    
-
-    rm ${HERE}/.inProgress
+    rm ${HERE}/.dlInProgress
+    # echo "##########  AT REST!" >> ${HERE}/log
 fi

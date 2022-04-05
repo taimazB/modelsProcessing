@@ -1,14 +1,15 @@
 #!/bin/bash
-ftpLink='https://coastwatch.pfeg.noaa.gov/erddap/griddap/nesdisVHNnoaa20chlaDaily.nc?chlor_a'
+# ftpLink='https://coastwatch.pfeg.noaa.gov/erddap/griddap/nesdisVHNnoaa20chlaDaily.nc?chlor_a'
+ftpLink='https://coastwatch.pfeg.noaa.gov/erddap/griddap/nesdisVHNnoaaSNPPnoaa20chlaGapfilledDaily.nc?chlor_a'
 
 ############################################################################
 
-HERE=${HOME}/Projects/OceanGNS/data/Chlorophyll/NESDIS
-archive=/media/taimaz/14TB/Chlorophyll/NESDIS/
+export HERE=${HOME}/Projects/data/Chlorophyll/NESDIS
+export remote=taimazhome.ddns.net
+export tiles=${remote}:/media/taimaz/mapTiles/Chlorophyll/NESDIS/tiles
+export ncArchive=/media/taimaz/14TB/Chlorophyll/NESDIS/nc
 
-# export http_proxy='158.199.141.158:8083'
 
-rm ${HERE}/tmp.nc
 dlLink="${ftpLink}[(last)][(0.0):1:(0.0)][(1):1:(0)][(0):1:(1)]"
 axel -a -n 50 -o ${HERE}/tmp.nc ${dlLink}
 lastAvailDate=`ncdump -h ${HERE}/tmp.nc | grep time_coverage_start | sed 's/.*time_coverage_start = "// ; s/T.*//'`
@@ -16,35 +17,62 @@ lastAvailDate=`date -d "${lastAvailDate}" +%Y%m%d`
 lastDlDate=`cat ${HERE}/.lastAvailDate`
 rm ${HERE}/tmp.nc
 
-# lastAvailDate=$1
-    
+
+############################################################################
+##  FUNCTIONS
+
+function log() {
+    echo $1 >> ${HOME}/Projects/data/log
+    echo $1 | mail -s "Processing log" tb4764@mun.ca
+}
+
+function backJobs {
+    cd ${HERE}
+    # Loop until rsyncs are complete (overcome rsync connection drops)
+    resync=1
+    while [[ ${resync} -ne 0 ]]; do
+	resync=0
+	##  Copy tiles to tile server
+	rsync -aurq --timeout=10000 -e 'ssh -T -p 4412' ${HERE}/tiles/ ${tiles}
+	resync=`echo "${resync} + $?" | bc`
+	##  Archive nc files
+	rsync -auq --timeout=10000 --partial ${HERE}/nc/ ${ncArchive}
+	resync=`echo "${resync} + $?" | bc`
+    done
+    log "`date` - Chlorophyll NESDIS - rsynched - DONE"
+}
+
+
 if [[ ${lastAvailDate} != ${lastDlDate} ]]; then
 
+    log "`date` - Chlorophyll NESDIS - STARTED"
+    rm -r ${HERE}/nc/ ${HERE}/tiles/
+    
     mkdir ${HERE}/nc/
     cd ${HERE}/nc/
     dlLink="${ftpLink}[(last)][(0.0):1:(0.0)][(85):1:(-85)][(-179.99):1:(179.99)]"
-    axel -a -n 50 -o ${HERE}/nc/NESDIS_Chlorophyll_${lastAvailDate}_12.nc ${dlLink}
+    axel -a -n 50 -o ${HERE}/nc/NESDIS_Chlorophyll_${lastAvailDate}.nc ${dlLink}
+    log "`date` - Chlorophyll NESDIS - Downloaded"
 
     
     ##################################################
     ##  nc -> tiles
     mkdir ${HERE}/tiles/
-    python3 ${HERE}/scripts/cnv_tile.py ${lastAvailDate}
+    cd ${HERE}/nc/
+    python3 ${HERE}/scripts/cnv.py ${lastAvailDate}
+    log "`date` - Chlorophyll NESDIS - Converted"
 
     
     ##################################################
-    ##  Copy tiles to server
-    rsync -aurz ${HERE}/tiles taimaz@159.203.6.104:/mnt/data/models/Chlorophyll/NESDIS/
+    ##  Remove empty tile directories
+    cd ${HERE}/tiles/
+    find . -type d -empty -delete
 
     
     ##################################################
-    ##  Backup
-    cd ${HERE}
-    rsync -aur ${HERE}/tiles ${archive}/
-    rm -r ${HERE}/tiles &
-    mv ${HERE}/nc/* ${archive}/nc
-    rm -r ${HERE}/nc/
-    
+    ##  Archive
+    backJobs &
+
     
     echo ${lastAvailDate} > ${HERE}/.lastAvailDate
     

@@ -1,92 +1,144 @@
 import numpy as np
 from netCDF4 import Dataset
-import os
 import sys
-import png
 import matplotlib.pyplot as plt
 from scipy import interpolate
+import multiprocessing
+import os
+import imageio
+# import tracemalloc
 from datetime import datetime, timedelta
-from colour import Color
 
 
+maxTileLat = 85.0511287798066
+tileSize = 512  # px
+minZoom = 2
+maxZoom = 7
+
+# tracemalloc.start()
 date = sys.argv[1]
 hr = int(sys.argv[2])
 
 dateSave = datetime.strptime(date, "%Y%m%d")
 hrSave = hr
-while(hrSave>=24):
+while(hrSave >= 24):
     dateSave += timedelta(days=1)
     hrSave -= 24
 
+dateSave = datetime.strftime(dateSave, "%Y%m%d")
 
-ncFile = Dataset("CMC_gdwps_global_ICEC_SFC_0_latlon0.25x0.25_%s00_P%03d.nc" % (date, hr), 'r')
 
-ice = ncFile.variables['ci'][0].data
+ncFile = Dataset(
+    "CMC_gdwps_global_ICEC_SFC_0_latlon0.25x0.25_%s00_P%03d.nc" % (date, hr), 'r')
+seaice = ncFile.variables['ci'][0].data
+seaice[seaice < 0] = np.nan  # NaNs
+latNC = ncFile.variables['lat'][:].data
+lonNC = ncFile.variables['lon'][:].data
 
-iceMin = 0.
-iceMax = 1.
 
-ice[ice<0] = iceMin  ##  For interpolation, NaN is not accepted
+##  Crop -85 < lats < 85
+latMask = np.bitwise_and(latNC>-85,latNC<85)
+seaice = seaice[latMask, :]
+latNC = latNC[latMask]
 
-##  latitude and longitude
-lat = np.arange(-80,80.01,0.25)
-lon = np.arange(-180,180,0.25)
-ice = ice[40:681]  ##  Limit lat range (80S - 80N)
 
 ##  Switch west and east
-tmp = np.copy(ice[:,:720])
-ice[:,:720] = ice[:,720:]
-ice[:,720:] = tmp
+tmp = np.copy(seaice[:,:720])
+seaice[:,:720] = seaice[:,720:]
+seaice[:,720:] = tmp
+tmp = np.copy(lonNC[:720])
+lonNC[:720] = lonNC[720:]
+lonNC[720:] = tmp
+
+lonNC[lonNC>=180] -= 360
 
 
-##  Mercator
+# NC Mercator
 R = 6378137
-x = R * lon * np.pi/180.
-y = R * np.log( np.tan(np.pi/4 + lat*np.pi/180/2) )
+xNC = R * lonNC * np.pi/180.
+yNC = R * np.log(np.tan(np.pi/4 + latNC*np.pi/180/2))
 
 
-##  For interpolation
-xx = np.linspace(np.min(x), np.max(x), 36000)  ## 0.01 deg
-yy = np.linspace(np.min(y), np.max(y), 16000)  ## 0.01 deg
+# Fixed min/max values for all levels and times
+seaiceMin = 0.
+seaiceMax = 1.
 
 
-f = interpolate.interp2d(x, y, ice, kind='linear')
-iceNew = f(xx, yy)
-iceNewRounded = np.round(iceNew, 2)
-iceNewRounded[iceNewRounded>iceMax] = iceMax
-iceNewRounded[iceNewRounded<iceMin] = iceMin
-iceNewInt = (100*(iceNewRounded)).astype(np.int)
+# For interpolation, NaN is not accepted
+seaice[np.isnan(seaice)] = seaiceMin-1
+f = interpolate.interp2d(xNC, yNC, seaice, kind='linear')
 
 
-##  No ice = white
-color0  = [Color('white').rgb]
+###################################################################
+###########################  FUNCTIONS  ###########################
 
-##  Blue range
-colors1 = [color.rgb for color in list(Color("#fff").range_to(Color("#00f"), 100))]
+def xMercator(lon):
+    return R * lon * np.pi/180.
 
-##  All ranges
+
+def yMercator(lat):
+    return R * np.log(np.tan(np.pi/4 + lat*np.pi/180/2))
+
+
+def saveImg(i, j):
+    devNull = os.system('mkdir -p ../tiles/CMC_Seaice_%s_%02d/%d/%d' %
+                        (dateSave, hrSave, zoom, i))
+    seaiceNew = f(xTile[i*tileSize: (i+1)*tileSize],
+                  yTile[j * tileSize:(j+1) * tileSize])
+    seaiceNew[seaiceNew > seaiceMax] = seaiceMax
+    seaiceNew[seaiceNew < seaiceMin] = seaiceMin
+    if(np.max(seaiceNew) == 0):
+        return
+    else:
+        # Coloring
+        seaiceNewRounded = np.round(seaiceNew, 2)
+        seaiceNewInt = (100*(seaiceNewRounded-seaiceMin)).astype(np.int8)
+        seaiceNewInt[seaiceNewInt < 0] = 0
+        seaiceNewInt[seaiceNewInt > 100 *
+                     (seaiceMax-seaiceMin)] = 100*(seaiceMax-seaiceMin)
+        seaiceColored = colors[seaiceNewInt]
+        # Saving
+        imageio.imwrite('../tiles/CMC_Seaice_%s_%02d/%d/%d/%d.png' % (dateSave, hrSave,
+                                                                      zoom, i, 2**zoom-j-1), np.flipud(seaiceColored).astype(np.uint8))
+
+
+def colorRange(color1, color2, n):
+    colors = []
+    for r, g, b,a in zip(np.linspace(color1[0], color2[0], n), np.linspace(color1[1], color2[1], n), np.linspace(color1[2], color2[2], n),np.linspace(color1[3], color2[3], n)):
+        colors.append((r, g, b,a))
+    return colors
+
+
+# No Ice = transparent
+color0 = [(0,0,0,0)]
+colors1 = colorRange([255, 255, 255,255], [0,102,204,255], 100)
+
+# All ranges
 colors = np.array(color0+colors1)
-iceColored = 255*colors[iceNewInt]
 
 
-os.mkdir("../png/CMC_Seaice_%s_%02d/" % (datetime.strftime(dateSave, "%Y%m%d"),hrSave))
-for i in np.arange(18):
-    ##  Due to the damn Mercator projection:
-    j = 0
-    for lat1,lat2 in zip(np.arange(-80,80,20),np.arange(-60,100,20)):
-        y1 = R * np.log( np.tan(np.pi/4 + lat1*np.pi/180/2) )
-        j1 = np.abs(yy-y1).argmin()
-        y2 = R * np.log( np.tan(np.pi/4 + lat2*np.pi/180/2) )
-        j2 = np.abs(yy-y2).argmin()
-        subIce = iceColored[j1:j2, i*2000:(i+1)*2000]
-        img2list = np.flipud(subIce).reshape(-1, 3*subIce.shape[1]).astype(np.uint8)
-        with open('../png/CMC_Seaice_%s_%02d/CMC_Seaice_%s_%02d_reg%02d-%02d.png' % (datetime.strftime(dateSave, "%Y%m%d"),hrSave,datetime.strftime(dateSave, "%Y%m%d"),hrSave, i,j), 'wb') as f:
-            writer = png.Writer(width=subIce.shape[1], height=subIce.shape[0], bitdepth=8, greyscale=False)
-            writer.write(f, img2list)
-        j += 1
+def saveTile():
+    global zoom, seaiceNew
+    global xTile, yTile
+    #
+    for zoom in np.arange(minZoom, maxZoom+1):
+        print("--  Start zoom %d" % zoom)
+        noOfPoints = 2**zoom*tileSize
+        #
+        xTile = np.linspace(xMercator(-180),
+                            xMercator(180), noOfPoints)
+        yTile = np.linspace(yMercator(-maxTileLat),
+                            yMercator(maxTileLat), noOfPoints)
+        #
+        iters = np.array(np.meshgrid(np.arange(2**zoom),
+                                     np.arange(2**zoom))).T.reshape(-1, 2)
+        #
+        poolSize = min(len(iters), 32)
+        with multiprocessing.Pool(poolSize) as p:
+            p.starmap(saveImg, iters)
 
 
+saveTile()
+# print(tracemalloc.get_traced_memory())
+# tracemalloc.stop()
 exit()
-
-plt.imshow(sstNew)
-plt.show()

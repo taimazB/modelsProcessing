@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "layers": {
+    "chlorophyll": {
+      "source": "mapbox://tileset-source/taimaz/chlorophyll",
+      "minzoom": 4,
+      "maxzoom": 9
+    }
+  }
+}

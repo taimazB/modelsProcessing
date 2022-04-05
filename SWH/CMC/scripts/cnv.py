@@ -1,111 +1,144 @@
 import numpy as np
 from netCDF4 import Dataset
-import os
 import sys
-import png
 import matplotlib.pyplot as plt
 from scipy import interpolate
+import multiprocessing
+import os
+import imageio
+# import tracemalloc
 from datetime import datetime, timedelta
-from colour import Color
 
 
+maxTileLat = 85.0511287798066
+tileSize = 512  # px
+minZoom = 2
+maxZoom = 7
+
+# tracemalloc.start()
 date = sys.argv[1]
 hr = int(sys.argv[2])
 
 dateSave = datetime.strptime(date, "%Y%m%d")
 hrSave = hr
-while(hrSave>=24):
+while(hrSave >= 24):
     dateSave += timedelta(days=1)
     hrSave -= 24
+dateSave = dateSave.strftime("%Y%m%d")
 
-
-ncFile = Dataset("CMC_gdwps_global_HTSGW_SFC_0_latlon0.25x0.25_%s00_P%03d.nc" % (date, hr), 'r')
-
-## Significant height of combined wind waves and swell
+ncFile = Dataset(
+    "CMC_gdwps_global_HTSGW_SFC_0_latlon0.25x0.25_%s00_P%03d.nc" % (date, hr), 'r')
 swh = ncFile.variables['swh'][0].data
+swh[swh == ncFile.variables['swh']._FillValue] = np.nan
+latNC = ncFile.variables['lat'][:].data
+lonNC = ncFile.variables['lon'][:].data
+lonNC[lonNC >= 180] -= 360
+# Switch west and east
+tmp = np.copy(swh[:, :720])
+swh[:, :720] = swh[:, 720:]
+swh[:, 720:] = tmp
+tmp = np.copy(lonNC[:720])
+lonNC[:720] = lonNC[720:]
+lonNC[720:] = tmp
 
-swhMin = 0.
-swhMax = 10.
+# Crop lats above 85N and below 85S
+latMask = np.bitwise_and(latNC<=85, latNC>=-85)
+latNC = latNC[latMask]
+swh = swh[latMask]
 
-swh[swh<0] = swhMin  ##  For interpolation, NaN is not accepted
-
-##  latitude and longitude
-##  nc files are already from lat: 80S to 80N
-lat = np.arange(-80,80.01,0.25)
-lon = np.arange(0,360,0.25)
-swh = swh[40:681]  ##  Limit lat range
-
-
-##  Switch west and east
-tmp = np.copy(swh[:,:720])
-swh[:,:720] = swh[:,720:]
-swh[:,720:] = tmp
-
-
-##  Mercator
+# NC Mercator
 R = 6378137
-x = R * lon * np.pi/180.
-y = R * np.log( np.tan(np.pi/4 + lat*np.pi/180/2) )
+xNC = R * lonNC * np.pi/180.
+yNC = R * np.log(np.tan(np.pi/4 + latNC*np.pi/180/2))
 
 
-##  For interpolation
-xx = np.linspace(np.min(x), np.max(x), 36000)  ## 0.01 deg
-yy = np.linspace(np.min(y), np.max(y), 16000)  ## 0.01 deg
+# Fixed min/max values for all levels and times
+swhMin = 0
+swhMax = 10
 
 
-f = interpolate.interp2d(x, y, swh, kind='linear')
-swhNew = f(xx, yy)
-swhNewRounded = np.round(swhNew, 1)
-swhNewRounded[swhNewRounded>swhMax] = swhMax+.1
-swhNewRounded[swhNewRounded<swhMin] = swhMin
-swhNewInt = (10*(swhNewRounded)).astype(np.int)
+# For interpolation, NaN is not accepted
+swh[np.isnan(swh)] = -9999
+f = interpolate.interp2d(xNC, yNC, swh, kind='linear')
+
+
+###################################################################
+###########################  FUNCTIONS  ###########################
+
+def xMercator(lon):
+    return R * lon * np.pi/180.
+
+
+def yMercator(lat):
+    return R * np.log(np.tan(np.pi/4 + lat*np.pi/180/2))
+
+
+def saveImg(i, j):
+    devNull = os.system('mkdir -p ../tiles/CMC_SWH_%s_%02d/%d/%d' %
+                        (dateSave, hrSave, zoom, i))
+    swhNew = f(xTile[i*tileSize: (i+1)*tileSize],
+               yTile[j * tileSize:(j+1) * tileSize])
+    swhNew[swhNew > swhMax] = swhMax
+    swhNew[swhNew < 0] = np.nan
+    swhNew[swhNew < swhMin] = swhMin
+    if(np.isnan(np.nanmax(swhNew))):
+        return
+    else:
+        # Coloring
+        swhNewRounded = np.round(swhNew, 1)
+        swhNewRounded[np.isnan(swhNewRounded)] = swhMin-.1
+        swhNewInt = (10*(swhNewRounded-swhMin)).astype(np.int16)+1
+        swhNewInt[swhNewInt < 0] = 0
+        swhNewInt[swhNewInt > 10 *
+                  (swhMax-swhMin)] = 10*(swhMax-swhMin)
+        swhColored = colors[swhNewInt]
+        # Saving
+        imageio.imwrite('../tiles/CMC_SWH_%s_%02d/%d/%d/%d.png' % (dateSave, hrSave,
+                                                                   zoom, i, 2**zoom-j-1), np.flipud(swhColored).astype(np.uint8))
+
+
+def colorRange(color1, color2, n):
+    colors = []
+    for r, g, b, a in zip(np.linspace(color1[0], color2[0], n), np.linspace(color1[1], color2[1], n), np.linspace(color1[2], color2[2], n), np.linspace(color1[3], color2[3], n)):
+        colors.append((r, g, b, a))
+    return colors
 
 
 ##  Continents = black
-color0  = [Color('black').rgb]
+color0 = [(0, 0, 0, 0)]
 
-##  Blue range
-colors1 = [color.rgb for color in list(Color("#039").range_to(Color("#6cf"), 10))]
+colors1 = colorRange([0, 51, 153, 255], [0, 255, 204, 255], 20)
+colors2 = colorRange([0, 255, 204, 255], [51, 204, 51, 255], 20)
+colors3 = colorRange([51, 204, 51, 255], [204, 204, 0, 255], 20)
+colors4 = colorRange([204, 204, 0, 255], [204, 0, 0, 255], 20)
+colors5 = colorRange([204, 0, 0, 255], [255, 204, 204, 255], 20)
 
-##  Green range
-colors2 = [color.rgb for color in list(Color("#030").range_to(Color("#9f9"), 10))]
-
-##  Yellow range
-colors3 = [color.rgb for color in list(Color("#ff0").range_to(Color("#f93"), 30))]
-
-##  Red range
-colors4 = [color.rgb for color in list(Color("#f00").range_to(Color("#fcc"), 50))]
-
-##  Above max
-color5 = [Color('#fdd').rgb]
-
-##  All ranges
-colors = np.array(color0+colors1+colors2+colors3+colors4+color5)
-swhColored = 255*colors[swhNewInt]
+# All ranges
+colors = np.array(color0+colors1+colors2+colors3+colors4+colors5)
 
 
-try:
-    os.mkdir("../png/CMC_SWH_%s_%02d/" % (datetime.strftime(dateSave, "%Y%m%d"),hrSave))
-except:
-    pass
+def saveTile():
+    global zoom, swhNew
+    global xTile, yTile
+    #
+    for zoom in np.arange(minZoom, maxZoom+1):
+        print("--  Start zoom %d" % zoom)
+        noOfPoints = 2**zoom*tileSize
+        #
+        xTile = np.linspace(xMercator(-180),
+                            xMercator(180), noOfPoints)
+        yTile = np.linspace(yMercator(-maxTileLat),
+                            yMercator(maxTileLat), noOfPoints)
+        #
+        iters = np.array(np.meshgrid(np.arange(2**zoom),
+                                     np.arange(2**zoom))).T.reshape(-1, 2)
+        #
+        poolSize = min(len(iters), 32)
+        with multiprocessing.Pool(poolSize) as p:
+            p.starmap(saveImg, iters)
 
-for i in np.arange(18):
-    ##  Due to the damn Mercator projection:
-    j = 0
-    for lat1,lat2 in zip(np.arange(-80,80,20),np.arange(-60,100,20)):
-        y1 = R * np.log( np.tan(np.pi/4 + lat1*np.pi/180/2) )
-        j1 = np.abs(yy-y1).argmin()
-        y2 = R * np.log( np.tan(np.pi/4 + lat2*np.pi/180/2) )
-        j2 = np.abs(yy-y2).argmin()
-        subSwh = swhColored[j1:j2, i*2000:(i+1)*2000]
-        img2list = np.flipud(subSwh).reshape(-1, 3*subSwh.shape[1]).astype(np.uint8)
-        with open('../png/CMC_SWH_%s_%02d/CMC_SWH_%s_%02d_reg%02d-%02d.png' % (datetime.strftime(dateSave, "%Y%m%d"),hrSave,datetime.strftime(dateSave, "%Y%m%d"),hrSave, i,j), 'wb') as f:
-            writer = png.Writer(width=subSwh.shape[1], height=subSwh.shape[0], bitdepth=8, greyscale=False)
-            writer.write(f, img2list)
-        j += 1
 
-
+saveTile()
+# print(tracemalloc.get_traced_memory())
+# tracemalloc.stop()
 exit()
-
-plt.imshow(sstNew)
-plt.show()

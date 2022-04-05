@@ -1,183 +1,243 @@
 import numpy as np
 from netCDF4 import Dataset
 import sys
-import png
 import matplotlib.pyplot as plt
 from scipy import interpolate
 import multiprocessing
+import os
+import imageio
+# import tracemalloc
 from datetime import datetime, timedelta
+import subprocess
 
 
-date = sys.argv[1]
-hr = int(sys.argv[2])
+maxTileLat = 85.0511287798066
+tileSize = 512  # px
+minZoom = 2
+maxZoom = 7
 
-if (hr<24):
-    dateSave = date
-    hrSave = hr
-elif (hr<48):
-    dateSave = datetime.strftime(datetime.strptime(date, "%Y%m%d") + timedelta(days=1), "%Y%m%d")
-    hrSave = hr - 24
-elif (hr<72):
-    dateSave = datetime.strftime(datetime.strptime(date, "%Y%m%d") + timedelta(days=2), "%Y%m%d")
-    hrSave = hr - 48
+# tracemalloc.start()
+modelDate = sys.argv[1]
+modelHour = sys.argv[2]
+hr = int(sys.argv[3])
+
+
+dateSave = datetime.strftime(datetime.strptime(modelDate+modelHour,'%Y%m%d%H') + timedelta(hours=hr), "%Y%m%d_%H")
 
 
 missingValue = -9e+33
 
 
-ncFile = Dataset("CMC_coupled-rdps-stlawrence-ocean_latlon0.02x0.03_%s00_P%03d.nc" % (date, hr),'r')
-u = ncFile.variables['ocu'][0,0].data
-u[u==missingValue] = np.nan
-v = ncFile.variables['ocv'][0,0].data
-v[v==missingValue] = np.nan
+inputFile = "CMC_coupled-rdps-stlawrence-ocean_latlon0.02x0.03_%s%s_P%03d.nc" % (modelDate, modelHour, hr)
+ncFile = Dataset(inputFile, 'r')
+u = ncFile.variables['ocu'][0, 0].data
+u[u == missingValue] = np.nan
+v = ncFile.variables['ocv'][0, 0].data
+v[v == missingValue] = np.nan
 
 
 ##  latitude and longitude
-lat = np.array(ncFile.variables['lat'])
-lon = np.array(ncFile.variables['lon'])
-
-# uGlob = np.empty((8001,12000)) ## 0.02 x 0.03 deg
-# vGlob = np.empty((8001,12000)) ## ...
-
-# iLonStart = int(lon.min()/.03)
-# iLonEnd = int(lon.max()/.03)+1
-# iLatStart = int((80+lat.min())/.02)
-# iLatEnd = int((80+lat.max())/.02)+1
-# uGlob[iLatStart:iLatEnd, iLonStart:iLonEnd] = u[:,:]  ## lat: -80 - 80
-# vGlob[iLatStart:iLatEnd, iLonStart:iLonEnd] = v[:,:]  ## ...
+latNC = np.array(ncFile.variables['lat'])
+lonNC = np.array(ncFile.variables['lon'])
+lonNC[lonNC > 180] -= 360
 
 
 ##  Mercator
-# lat = np.arange(-80,80.01,0.02)
-# lon = np.arange(0,360,0.03)
-
 R = 6378137
-x = R * lon * np.pi/180.
-y = R * np.log( np.tan(np.pi/4 + lat*np.pi/180/2) )
+xNC = R * lonNC * np.pi/180.
+yNC = R * np.log(np.tan(np.pi/4 + latNC*np.pi/180/2))
 
 
-##  For interpolation
-# xx = np.linspace(np.min(x), np.max(x), 12000)  ## 0.03 deg
-# yy = np.linspace(np.min(y), np.max(y), 8001)  ## 0.02 deg
-xx = np.linspace(np.min(x), np.max(x), lon.size)
-yy = np.linspace(np.min(y), np.max(y), lat.size)
+# Fixed min/max values for all levels and times
+uvMin = -1
+uvMax = 1
 
 
-##  Fixed min/max values for all levels and times
-uMin = -1.5
-uMax = 1.5
-vMin = -1.5
-vMax = 1.5
-
-
-##  For interpolation, NaN is not accepted
+# For interpolation, NaN is not accepted
 u[np.isnan(u)] = 0
 v[np.isnan(v)] = 0
-
-fu = interpolate.interp2d(x, y, u, kind='linear')
-fv = interpolate.interp2d(x, y, v, kind='linear')
-
-uNew = fu(xx, yy)
-vNew = fv(xx, yy)
-
-##  Normalize values
-uNew = (65535*(uNew-uMin)/(uMax-uMin)).astype(np.uint16)
-vNew = (65535*(vNew-vMin)/(vMax-vMin)).astype(np.uint16)
-
-##  Rearrange u and v to lon: -180 to 180
-uNew = np.concatenate((uNew[:,6000:], uNew[:,:6000]), axis=1)
-vNew = np.concatenate((vNew[:,6000:], vNew[:,:6000]), axis=1)
-
-##  Save image
-img = np.empty((lat.size,lon.size,3), dtype=np.uint16)
-img[:,:,0] = uNew[:,:]
-img[:,:,1] = vNew[:,:]
-img[:,:,2] = 0
-
-with open('../../png/CMC_Currents_%s_%02d.png' % (dateSave, hrSave), 'wb') as f:
-    writer = png.Writer(width=img.shape[1], height=img.shape[0], bitdepth=16, greyscale=False)
-    # Convert img to the Python list of lists expected by the png writer
-    img2list = np.flipud(img).reshape(-1, img.shape[1]*img.shape[2]).tolist()
-    writer.write(f, img2list)
+fu = interpolate.interp2d(xNC, yNC, u, kind='linear')
+fv = interpolate.interp2d(xNC, yNC, v, kind='linear')
 
 
-# plt.imshow(img)
-# plt.show()
+###################################################################
+###########################  FUNCTIONS  ###########################
 
 
-#############################################
-##  Average depth for forecast/hindcast files
-##  Interpolate to have square dimensions
-if (hr<24):
-    lat = np.array(ncFile.variables['lat'])
-    lon = np.array(ncFile.variables['lon'])
-    latOld = np.arange(lat.min(),lat.max()+0.01,0.02)
-    lonOld = np.arange(lon.min(),lon.max()+0.01,0.03)
-    latNew = np.arange(lat.min(),lat.max()+0.01,0.02)
-    lonNew = np.arange(lon.min(),lon.max()+0.01,0.02)
-
-    ##  Regrid (GNT needs same lat & lon resolution)
-    uNew = np.empty((len(latNew), len(lonNew))) * np.nan
-    vNew = np.empty((len(latNew), len(lonNew))) * np.nan
+def xMercator(lon):
+    return R * lon * np.pi/180.
 
 
-    ##  For interpolation, NaN is not accepted
-    u[np.isnan(u)] = 0
-    v[np.isnan(v)] = 0
-
-    fu = interpolate.interp2d(lonOld, latOld, u, kind='linear')
-    fv = interpolate.interp2d(lonOld, latOld, v, kind='linear')
-
-    uNew = fu(lonNew, latNew)
-    vNew = fv(lonNew, latNew)
+def yMercator(lat):
+    return R * np.log(np.tan(np.pi/4 + lat*np.pi/180/2))
 
 
-    ##  Turn land into nan
-    uNew[(uNew==0) & (vNew==0)] = np.nan
-    vNew[np.isnan(uNew)] = np.nan
+def saveImg(i, j):
+    devNull = os.system('mkdir -p ../tiles/CMC_Currents_%s/%d/%d' %
+                        (dateSave, zoom, i))
+    uNew = fu(xTile[i*tileSize: (i+1)*tileSize],
+              yTile[j * tileSize:(j+1) * tileSize])
+    vNew = fv(xTile[i*tileSize: (i+1)*tileSize],
+              yTile[j * tileSize:(j+1) * tileSize])
+    uNew[uNew > uvMax] = uvMax
+    uNew[uNew < uvMin] = uvMin
+    vNew[vNew > uvMax] = uvMax
+    vNew[vNew < uvMin] = uvMin
+    #
+    # To trim the interpolation tail from the right side
+    iLonMax = np.argmin(np.abs(xTile-xMercator(lonNC[-1])))
+    if((i+1)*tileSize > iLonMax):
+        if(i*tileSize > iLonMax):
+            uNew[:,:] = 0
+            vNew[:,:] = 0
+        else:
+            uNew[:,iLonMax % tileSize:] = 0
+            vNew[:,iLonMax % tileSize:] = 0
+    #
+    # To trim the interpolation tail from the left side
+    iLonMin = np.argmin(np.abs(xTile-xMercator(lonNC[0])))
+    if(i*tileSize < iLonMin):
+        if((i+1)*tileSize < iLonMin):
+            uNew[:,:] = 0
+            vNew[:,:] = 0
+        else:
+            uNew[:,:iLonMin % tileSize] = 0
+            vNew[:,:iLonMin % tileSize] = 0
+    #
+    # To trim the interpolation tail from the top side
+    jLatMax = np.argmin(np.abs(yTile-yMercator(latNC[-1])))
+    if((j+1)*tileSize > jLatMax):
+        if(j*tileSize > jLatMax):
+            uNew[:,:] = 0
+            vNew[:,:] = 0
+        else:
+            uNew[jLatMax % tileSize:,:] = 0
+            vNew[jLatMax % tileSize:,:] = 0
+    #
+    # To trim the interpolation tail from the bottom side
+    jLatMin = np.argmin(np.abs(yTile-yMercator(latNC[0])))
+    if(j*tileSize < jLatMin):
+        if((j+1)*tileSize < jLatMin):
+            uNew[:,:] = 0
+            vNew[:,:] = 0
+        else:
+            uNew[:jLatMin % tileSize,:] = 0
+            vNew[:jLatMin % tileSize,:] = 0
+    #
+    # Normalize
+    uNew = (255*(uNew-uvMin)/(uvMax-uvMin)).astype(np.uint)
+    vNew = (255*(vNew-uvMin)/(uvMax-uvMin)).astype(np.uint)
+    #
+    if(np.min(uNew) == 127 and np.max(uNew) == 127 and np.min(vNew) == 127 and np.max(vNew) == 127):
+        return
+    else:
+        # Coloring
+        uvColored = np.empty(
+            (uNew.shape[0], uNew.shape[1], 3), dtype=np.uint8)
+        uvColored[:, :, 0] = uNew[:, :]
+        uvColored[:, :, 1] = vNew[:, :]
+        uvColored[:, :, 2] = 0
+        imageio.imwrite('../tiles/CMC_Currents_%s/%d/%d/%d.png' % (dateSave, zoom, i, 2**zoom-j-1), np.flipud(uvColored).astype(np.uint8))
 
-    iLatMax, iLonMax = uNew.shape
+
+# def saveImg2(i, j, iSub):
+#     devNull = os.system(
+#         'mkdir -p ../tiles/CMC_Currents_%s_%02d/%d/%d' % (dateSave, hrSave,  zoom, i+n*iSub))
+#     subUnew = uNew[j*tileSize:(j+1) * tileSize, i*tileSize:(i+1)*tileSize]
+#     subVnew = vNew[j*tileSize:(j+1) * tileSize, i*tileSize:(i+1)*tileSize]
+#     ##  Only save if there is non-zero data
+#     if(np.min(subUnew)==127 and np.max(subUnew)==127 and np.min(subVnew)==127 and np.max(subVnew)==127):
+#         return
+#     else:
+#         uvColored = np.empty(
+#             (subUnew.shape[0], subVnew.shape[1], 3), dtype=np.uint16)
+#         uvColored[:, :, 0] = subUnew[:, :]
+#         uvColored[:, :, 1] = subVnew[:, :]
+#         uvColored[:, :, 2] = 0
+#         imageio.imwrite('../tiles/CMC_Currents_%s_%02d/%d/%d/%d.jpg' % (dateSave, hrSave,zoom, i+n*iSub, 2**zoom-j-1), np.flipud(uvColored).astype(np.uint8))
 
 
-    ##  Write netCDF
-    # open a netCDF file to write
-    fileName = "CMC_Currents_surface_%s_%02d.nc" % (date, hr)
-    ncout = Dataset(fileName, 'w', format='NETCDF4')
+def saveTile():
+    # It's only surface, so no averaging
+    # uz = uGlob
+    # vz = vGlob
+    #
+    # For interpolation, NaN is not accepted
+    # uz[np.isnan(uz)] = 0
+    # vz[np.isnan(vz)] = 0
+    #
+    # fu = interpolate.interp2d(x, y, uz, kind='linear')
+    # fv = interpolate.interp2d(x, y, vz, kind='linear')
+    #
+    #
+    global zoom, uNew, vNew
+    global xTile, yTile
+    for zoom in np.arange(minZoom, maxZoom+1):
+        print("--  Start zoom %d" % zoom)
+        noOfPoints = 2**zoom*tileSize
+        #
+        xTile = np.linspace(xMercator(-180),
+                            xMercator(180), noOfPoints)
+        yTile = np.linspace(yMercator(-maxTileLat),
+                            yMercator(maxTileLat), noOfPoints)
+        # xx = np.linspace(xMercator(-180),
+        #                  xMercator(180), noOfPoints)
+        # yy = np.linspace(yMercator(-maxTileLat),
+        #                  yMercator(maxTileLat), noOfPoints)
+        #
+        # if zoom <= 5:
+        #     uNew = fu(xx, yy)
+        #     vNew = fv(xx, yy)
+        #     #
+        #     uNew[uNew > uvMax] = uvMax
+        #     uNew[uNew < uvMin] = uvMin
+        #     vNew[vNew > uvMax] = uvMax
+        #     vNew[vNew < uvMin] = uvMin
+        #     #
+        #     # Normalize values
+        #     uNew = (255*(uNew-uvMin)/(uvMax-uvMin)).astype(np.uint)
+        #     vNew = (255*(vNew-uvMin)/(uvMax-uvMin)).astype(np.uint)
+        #
+        #
+        iters = np.array(np.meshgrid(np.arange(2**zoom),
+                         np.arange(2**zoom))).T.reshape(-1, 2)
+        #
+        poolSize = min(len(iters), 32)
+        with multiprocessing.Pool(poolSize) as p:
+            p.starmap(saveImg, iters)
+            #
+            #
+        # else:  # For memory issues, need to break into chunks for zooms>=6
+        #     xLength = n*tileSize  # Due to memory issue
+        #     xChunks = int(xx.size / xLength)
+        #     for iSub in np.arange(xChunks):
+        #         xxSub = xx[int(iSub*noOfPoints/xChunks)                           :int((iSub+1)*noOfPoints/xChunks)]
+        #         uNew = fu(xxSub, yy)
+        #         vNew = fv(xxSub, yy)
+        #         print("##  Interpolating %d of %d done." % (iSub+1, xChunks))
+        #         #
+        #         uNew[uNew > uvMax] = uvMax
+        #         uNew[uNew < uvMin] = uvMin
+        #         vNew[vNew > uvMax] = uvMax
+        #         vNew[vNew < uvMin] = uvMin
+        #         #
+        #         # Normalize values
+        #         uNew = (255*(uNew-uvMin)/(uvMax-uvMin)).astype(np.uint)
+        #         vNew = (255*(vNew-uvMin)/(uvMax-uvMin)).astype(np.uint)
+        #         #
+        #         #
+        #         iters = np.array(np.meshgrid(
+        #             np.arange(n), np.arange(2**zoom), [iSub])).T.reshape(-1, 3)
+        #         #
+        #         poolSize = min(len(iters), 32)
+        #         with multiprocessing.Pool(poolSize) as p:
+        #             p.starmap(saveImg2, iters)
 
-    # define axis size
-    ncout.createDimension('x', iLonMax)
-    ncout.createDimension('y', iLatMax)
 
-    # create latitude axis
-    latitude = ncout.createVariable('latitude', 'double', ('y'))
-    latitude.standard_name = 'latitude'
-    latitude.long_name = 'latitude'
-    latitude.units = 'degrees_north'
-    latitude.axis = 'Y'
+saveTile()
 
-    # create longitude axis
-    longitude = ncout.createVariable('longitude', 'double', ('x'))
-    longitude.standard_name = 'longitude'
-    longitude.long_name = 'longitude'
-    longitude.units = 'degrees_east'
-    longitude.axis = 'X'
+##  Rename input file
+subprocess.call('mv -v %s CMC_Currents_%s.nc' % (inputFile, dateSave), shell=True)
 
-    # create variable array
-    uout = ncout.createVariable('u', 'double', ('y', 'x'))
-    uout.long_name = 'zonal velocity'
-    uout.units = 'm/s'
-    uout.coordinates = "latitude longitude"
-
-    vout = ncout.createVariable('v', 'double', ('y', 'x'))
-    vout.long_name = 'meridional velocity'
-    vout.units = 'm/s'
-    vout.coordinates = "latitude longitude"
-
-    ##  Filling with date
-    longitude[:] = lonNew[:]
-    latitude[:] = latNew[:]
-    uout[:,:] = uNew[:,:]
-    vout[:,:] = vNew[:,:]
-
-    # close files
-    ncout.close()
+# print(tracemalloc.get_traced_memory())
+# tracemalloc.stop()

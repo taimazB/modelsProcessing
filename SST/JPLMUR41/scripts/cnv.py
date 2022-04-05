@@ -1,72 +1,137 @@
 import numpy as np
 from netCDF4 import Dataset
 import sys
-import png
 import matplotlib.pyplot as plt
 from scipy import interpolate
 import multiprocessing
-from colour import Color
+import os
+import imageio
+# import tracemalloc
+from datetime import datetime, timedelta
 
+
+maxTileLat = 85.0511287798066
+tileSize = 512  # px
+minZoom = 2
+maxZoom = 7
+
+# tracemalloc.start()
 date = sys.argv[1]
 
 ncFile = Dataset("JPLMUR41_SST_%s_09.nc" % date, 'r')
 sst = ncFile.variables['analysed_sst'][0].data
-# lat = ncFile.variables['lat'][:].data
-lat = np.arange(-80,80,0.01)
-lon = ncFile.variables['lon'][:].data
-sstMin = -2.
-sstMax = 35.
+missingValue = -32768
+sst[sst == missingValue] = np.nan
+sst -= 273.15  # K -> C
+latNC = ncFile.variables['lat'][:].data
+lonNC = ncFile.variables['lon'][:].data
+lonNC[lonNC > 180] -= 360
 
 
-sst = sst[1000:-999,:]  ##  lat: 80S - 80N
-sst -= 273.15
-sst[sst<sstMin] = sstMin  ##  For interpolation, NaN is not accepted
-sst[sst>sstMax] = sstMax
-
-
-##  Mercator
+# NC Mercator
 R = 6378137
-x = R * lon * np.pi/180.
-y = R * np.log( np.tan(np.pi/4 + lat*np.pi/180/2) )
+xNC = R * lonNC * np.pi/180.
+yNC = R * np.log(np.tan(np.pi/4 + latNC*np.pi/180/2))
 
 
-##  For interpolation
-xx = np.linspace(np.min(x), np.max(x), lon.shape[0])  ## 0.01 deg
-yy = np.linspace(np.min(y), np.max(y), lat.shape[0])  ## 0.01 deg
+# Fixed min/max values for all levels and times
+sstMin = -2.1
+sstMax = 35
 
 
-f = interpolate.interp2d(x, y, sst, kind='linear')
+# For interpolation, NaN is not accepted
+sst[np.isnan(sst)] = -9999
+f = interpolate.interp2d(xNC, yNC, sst, kind='linear')
 
-sstNew = f(xx, yy)
-sstNewRounded = np.round(sstNew, 1)
-sstNewInt = (10*(sstNewRounded+2)).astype(np.int)
 
-color0  = [Color('black').rgb]
-colors1 = [color.rgb for color in list(Color("#c0c").range_to(Color("#f9f"), 20))]
-colors2 = [color.rgb for color in list(Color("#039").range_to(Color("#6cf"), 100))]
-colors3 = [color.rgb for color in list(Color("#030").range_to(Color("#9f9"), 100))]
-colors4 = [color.rgb for color in list(Color("#ff0").range_to(Color("#f93"), 100))]
-colors5 = [color.rgb for color in list(Color("#f00").range_to(Color("#fcc"), 50))]
+###################################################################
+###########################  FUNCTIONS  ###########################
+
+
+def xMercator(lon):
+    return R * lon * np.pi/180.
+
+
+def yMercator(lat):
+    return R * np.log(np.tan(np.pi/4 + lat*np.pi/180/2))
+
+
+def saveImg(i, j):
+    devNull = os.system('mkdir -p ../tiles/JPLMUR41_SST_%s_09/%d/%d' %
+                        (date, zoom, i))
+    sstNew = f(xTile[i*tileSize: (i+1)*tileSize],
+               yTile[j * tileSize:(j+1) * tileSize])
+    sstNew[sstNew > sstMax] = sstMax
+    # sstNew[sstNew < 0] = np.nan
+    # sstNew[sstNew < sstMin] = sstMin
+    sstNew[sstNew < sstMin] = np.nan
+    if(np.isnan(np.nanmax(sstNew))):
+        return
+    else:
+        # Coloring
+        sstNew[sstNew < sstMin] = sstMin
+        sstNewRounded = np.round(sstNew, 1)
+        sstNewInt = (10*(sstNewRounded-sstMin)).astype(np.int16)
+        sstNewInt[sstNewInt < 0] = 0
+        sstNewInt[sstNewInt > 10 *
+                  (sstMax-sstMin)] = 10*(sstMax-sstMin)
+        sstColored = colors[sstNewInt]
+        # Saving
+        imageio.imwrite('../tiles/JPLMUR41_SST_%s_09/%d/%d/%d.png' % (date,
+                                                                      zoom, i, 2**zoom-j-1), np.flipud(sstColored).astype(np.uint8))
+
+
+def colorRange(color1, color2, n):
+    colors = []
+    for r, g, b,a in zip(np.linspace(color1[0], color2[0], n), np.linspace(color1[1], color2[1], n), np.linspace(color1[2], color2[2], n),np.linspace(color1[3], color2[3], n)):
+        colors.append((r, g, b,a))
+    return colors
+
+
+# no data = transparent
+color0 = [(0, 0, 0, 0)]
+
+# Purple range
+colors1 = colorRange([204, 0, 204,255], [255, 153, 255,255], 20)
+
+# Blue range
+colors2 = colorRange([0, 102, 204,255], [102, 255, 204,255], 100)
+
+# Green range
+colors3 = colorRange([0, 153, 51,255], [204, 255, 102,255], 100)
+
+# Yellow range
+colors4 = colorRange([255, 255, 0,255], [255, 153, 51,255], 100)
+
+# Red range
+colors5 = colorRange([255, 0, 0,255], [255, 204, 204,255], 50)
+
+# All ranges
 colors = np.array(color0+colors1+colors2+colors3+colors4+colors5)
-sstColored = 255*colors[sstNewInt]
-
-for i in np.arange(18):
-    ##  Due to the damn Mercator projection:
-    j = 0
-    for lat1,lat2 in zip(np.arange(-80,80,20),np.arange(-60,100,20)):
-        y1 = R * np.log( np.tan(np.pi/4 + lat1*np.pi/180/2) )
-        j1 = np.abs(yy-y1).argmin()
-        y2 = R * np.log( np.tan(np.pi/4 + lat2*np.pi/180/2) )
-        j2 = np.abs(yy-y2).argmin()
-        subSST = sstColored[j1:j2, i*2000:(i+1)*2000]
-        img2list = np.flipud(subSST).reshape(-1, 3*subSST.shape[1]).astype(np.uint8)
-        with open('../png/JPLMUR41_SST_%s_09/JPLMUR41_SST_%s_09_reg%02d-%02d.png' % (date,date,i,j), 'wb') as f:
-            writer = png.Writer(width=subSST.shape[1], height=subSST.shape[0], bitdepth=8, greyscale=False)
-            writer.write(f, img2list)
-        j += 1
 
 
+def saveTile():
+    global zoom, sstNew
+    global xTile, yTile
+    #
+    for zoom in np.arange(minZoom, maxZoom+1):
+        print("--  Start zoom %d" % zoom)
+        noOfPoints = 2**zoom*tileSize
+        #
+        xTile = np.linspace(xMercator(-180),
+                            xMercator(180), noOfPoints)
+        yTile = np.linspace(yMercator(-maxTileLat),
+                            yMercator(maxTileLat), noOfPoints)
+        #
+        iters = np.array(np.meshgrid(np.arange(2**zoom),
+                                    np.arange(2**zoom))).T.reshape(-1, 2)
+        #
+        poolSize = min(len(iters), 32)
+        with multiprocessing.Pool(poolSize) as p:
+            p.starmap(saveImg, iters)
+
+
+saveTile()
+# print(tracemalloc.get_traced_memory())
+# tracemalloc.stop()
 exit()
-
-plt.imshow(sstNew)
-plt.show()

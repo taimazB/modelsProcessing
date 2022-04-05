@@ -1,164 +1,132 @@
 import numpy as np
 from netCDF4 import Dataset
 import sys
-import png
 import matplotlib.pyplot as plt
 from scipy import interpolate
 import multiprocessing
+import os
+import imageio
+# import tracemalloc
 from datetime import datetime, timedelta
 
 
+maxTileLat = 85.0511287798066
+tileSize = 512  # px
+minZoom = 2
+maxZoom = 7
+
+
 fileName = sys.argv[1]
-date = fileName.split('_')[0]
+iTime = int(sys.argv[2])  ##  between 0 and 23
+iDepth = 0
 
 ncFile = Dataset(fileName,'r')
 times = ncFile.variables['time'][:].data ##  minutes since 1900-01-01 00:00:00
-u = ncFile.variables['uo'][:].data
-v = ncFile.variables['vo'][:].data
-lat = ncFile.variables['lat'][:].data
-lon = ncFile.variables['lon'][:].data
+u = ncFile.variables['uo'][iTime,iDepth,:,:].data
+v = ncFile.variables['vo'][iTime,iDepth,:,:].data
+latNC = ncFile.variables['lat'][:].data
+lonNC = ncFile.variables['lon'][:].data
 depths = ncFile.variables['depth'][:].data
+
+baseTime = datetime(1900,1,1)
+date = (baseTime + timedelta(minutes=int(times[iTime]))).strftime("%Y%m%d_%H")
 
 missingValue = 1e+20
 u[u==missingValue] = np.nan
 v[v==missingValue] = np.nan
 
+
+##  Mercator
 R = 6378137
-x = R * lon * np.pi/180.
-y = R * np.log( np.tan(np.pi/4 + lat*np.pi/180/2) )
-
-
-##  For interpolation
-xx = np.linspace(np.min(x), np.max(x), lon.size)
-yy = np.linspace(np.min(y), np.max(y), lat.size)
+xNC = R * lonNC * np.pi/180.
+yNC = R * np.log( np.tan(np.pi/4 + latNC*np.pi/180/2) )
 
 
 ##  Fixed min/max values for all levels and times
-uMin = -1.5
-uMax = 1.5
-vMin = -1.5
-vMax = 1.5
+uvMin = -1.5
+uvMax = 1.5
 
 
 ##  For interpolation, NaN is not accepted
-# uGlob[np.isnan(uGlob)] = 0
-# vGlob[np.isnan(vGlob)] = 0
 u[np.isnan(u)] = 0
 v[np.isnan(v)] = 0
+fu = interpolate.interp2d(xNC, yNC, u, kind='linear')
+fv = interpolate.interp2d(xNC, yNC, v, kind='linear')
 
 
-baseTime = datetime(1900,1,1)
-for i in np.arange(times.size):
-    date = baseTime + timedelta(minutes=int(times[i]))
-    for j in np.arange(depths.size):
-        depth = np.int32(np.round(depths[j]))
-        uTimeDepth = u[i,j,:,:]
-        vTimeDepth = v[i,j,:,:]
-        # 
-        fu = interpolate.interp2d(x, y, uTimeDepth, kind='linear')
-        fv = interpolate.interp2d(x, y, vTimeDepth, kind='linear')
-        # 
-        uNew = fu(xx, yy)
-        vNew = fv(xx, yy)
+###################################################################
+###########################  FUNCTIONS  ###########################
+
+
+def xMercator(lon):
+    return R * lon * np.pi/180.
+
+
+def yMercator(lat):
+    return R * np.log(np.tan(np.pi/4 + lat*np.pi/180/2))
+
+
+def saveImg(i, j):
+    devNull = os.system('mkdir -p ../tiles/CMEMS_Currents_%s/%d/%d' %
+                        (date, zoom, i))
+    uNew = fu(xTile[i*tileSize: (i+1)*tileSize],
+              yTile[j * tileSize:(j+1) * tileSize])
+    vNew = fv(xTile[i*tileSize: (i+1)*tileSize],
+              yTile[j * tileSize:(j+1) * tileSize])
+    uNew[uNew > uvMax] = uvMax
+    uNew[uNew < uvMin] = uvMin
+    vNew[vNew > uvMax] = uvMax
+    vNew[vNew < uvMin] = uvMin
+    #
+    # To trim the interpolation tail from the left side
+    iLonMin = np.argmin(np.abs(xTile-xMercator(lonNC[0])))
+    if(i*tileSize < iLonMin):
+        if((i+1)*tileSize < iLonMin):
+            uNew[:,:] = 0
+            vNew[:,:] = 0
+        else:
+            uNew[:,:iLonMin % tileSize] = 0
+            vNew[:,:iLonMin % tileSize] = 0
+    #
+    # Normalize
+    uNew = (255*(uNew-uvMin)/(uvMax-uvMin)).astype(np.uint)
+    vNew = (255*(vNew-uvMin)/(uvMax-uvMin)).astype(np.uint)
+    #
+    if(np.min(uNew) == 127 and np.max(uNew) == 127 and np.min(vNew) == 127 and np.max(vNew) == 127):
+        return
+    else:
+        # Coloring
+        uvColored = np.empty(
+            (uNew.shape[0], uNew.shape[1], 3), dtype=np.uint8)
+        uvColored[:, :, 0] = uNew[:, :]
+        uvColored[:, :, 1] = vNew[:, :]
+        uvColored[:, :, 2] = 0
+        imageio.imwrite('../tiles/CMEMS_Currents_%s/%d/%d/%d.png' % (date,
+                        zoom, i, 2**zoom-j-1), np.flipud(uvColored).astype(np.uint8))
+
+
+
+def saveTile():
+    global zoom, uNew, vNew
+    global xTile, yTile
+    for zoom in np.arange(minZoom, maxZoom+1):
+        print("--  Start zoom %d" % zoom)
+        noOfPoints = 2**zoom*tileSize
         #
-        ##  Normalize values
-        uNew = (65535*(uNew-uMin)/(uMax-uMin)).astype(np.uint16)
-        vNew = (65535*(vNew-vMin)/(vMax-vMin)).astype(np.uint16)
-        # 
-        ##  Rearrange u and v to lon: -180 to 180
-        # uNew = np.concatenate((uNew[:,6000:], uNew[:,:6000]), axis=1)
-        # vNew = np.concatenate((vNew[:,6000:], vNew[:,:6000]), axis=1)
-        # 
-        ##  Save image
-        img = np.empty((uNew.shape[0],uNew.shape[1],3), dtype=np.uint16)
-        img[:,:,0] = uNew[:,:]
-        img[:,:,1] = vNew[:,:]
-        img[:,:,2] = 0
-        # 
-        with open('../png/CMEMS_Currents_%s_%s_%04d.png' % (date.strftime("%Y%m%d"), date.strftime("%H"),  depth), 'wb') as f:
-            writer = png.Writer(width=img.shape[1], height=img.shape[0], bitdepth=16, greyscale=False)
-            # Convert img to the Python list of lists expected by the png writer
-            img2list = np.flipud(img).reshape(-1, img.shape[1]*img.shape[2]).tolist()
-            writer.write(f, img2list)
+        xTile = np.linspace(xMercator(-180),
+                            xMercator(180), noOfPoints)
+        yTile = np.linspace(yMercator(-maxTileLat),
+                            yMercator(maxTileLat), noOfPoints)
+        iters = np.array(np.meshgrid(np.arange(2**zoom),
+                         np.arange(2**zoom))).T.reshape(-1, 2)
+        #
+        poolSize = min(len(iters), 32)
+        with multiprocessing.Pool(poolSize) as p:
+            p.starmap(saveImg, iters)
 
 
-# plt.imshow(img)
-# plt.show()
+
+saveTile()
+# print(tracemalloc.get_traced_memory())
+# tracemalloc.stop()
 exit()
-
-#############################################
-##  Average depth for forecast/hindcast files
-##  Interpolate to have square dimensions
-if (hr<24):
-    lat = np.array(ncFile.variables['lat'])
-    lon = np.array(ncFile.variables['lon'])
-    latOld = np.arange(lat.min(),lat.max()+0.01,0.02)
-    lonOld = np.arange(lon.min(),lon.max()+0.01,0.03)
-    latNew = np.arange(lat.min(),lat.max()+0.01,0.02)
-    lonNew = np.arange(lon.min(),lon.max()+0.01,0.02)
-
-    ##  Regrid (GNT needs same lat & lon resolution)
-    uNew = np.empty((len(latNew), len(lonNew))) * np.nan
-    vNew = np.empty((len(latNew), len(lonNew))) * np.nan
-
-
-    ##  For interpolation, NaN is not accepted
-    u[np.isnan(u)] = 0
-    v[np.isnan(v)] = 0
-
-    fu = interpolate.interp2d(lonOld, latOld, u, kind='linear')
-    fv = interpolate.interp2d(lonOld, latOld, v, kind='linear')
-
-    uNew = fu(lonNew, latNew)
-    vNew = fv(lonNew, latNew)
-
-
-    ##  Turn land into nan
-    uNew[(uNew==0) & (vNew==0)] = np.nan
-    vNew[np.isnan(uNew)] = np.nan
-
-    iLatMax, iLonMax = uNew.shape
-
-
-    ##  Write netCDF
-    # open a netCDF file to write
-    fileName = "CMC_Currents_surface_%s_%02d.nc" % (date, hr)
-    ncout = Dataset(fileName, 'w', format='NETCDF4')
-
-    # define axis size
-    ncout.createDimension('x', iLonMax)
-    ncout.createDimension('y', iLatMax)
-
-    # create latitude axis
-    latitude = ncout.createVariable('latitude', 'double', ('y'))
-    latitude.standard_name = 'latitude'
-    latitude.long_name = 'latitude'
-    latitude.units = 'degrees_north'
-    latitude.axis = 'Y'
-
-    # create longitude axis
-    longitude = ncout.createVariable('longitude', 'double', ('x'))
-    longitude.standard_name = 'longitude'
-    longitude.long_name = 'longitude'
-    longitude.units = 'degrees_east'
-    longitude.axis = 'X'
-
-    # create variable array
-    uout = ncout.createVariable('u', 'double', ('y', 'x'))
-    uout.long_name = 'zonal velocity'
-    uout.units = 'm/s'
-    uout.coordinates = "latitude longitude"
-
-    vout = ncout.createVariable('v', 'double', ('y', 'x'))
-    vout.long_name = 'meridional velocity'
-    vout.units = 'm/s'
-    vout.coordinates = "latitude longitude"
-
-    ##  Filling with date
-    longitude[:] = lonNew[:]
-    latitude[:] = latNew[:]
-    uout[:,:] = uNew[:,:]
-    vout[:,:] = vNew[:,:]
-
-    # close files
-    ncout.close()
